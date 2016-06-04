@@ -1,4 +1,5 @@
 import asyncio
+import abc
 
 #3rdparty
 try:
@@ -15,12 +16,15 @@ except:
 
 class CoExecutor:
 
+    @abc.abstractmethod
     def submit(self, coroutine_function, *args, **kwargs) -> asyncio.Future:
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def map(self, coroutine_function, *iterables, timeout=None):
         raise NotImplementedError()
 
+    @abc.abstractmethod
     async def shutdown(self, wait=True):
         raise NotImplementedError()
 
