@@ -1,6 +1,5 @@
 from coexecutor._base import *
 import asyncio
-import typing
 from collections import deque
 
 
@@ -20,6 +19,7 @@ class CoroutinePoolExecutor(CoExecutor):
         self._debug = debug
         self._pending_queue = deque()
         self._shutdowned = False
+        self._waiter = asyncio.Condition(loop=self._loop)
 
         if self._debug:
             async def _thread_monitor():
@@ -43,12 +43,20 @@ class CoroutinePoolExecutor(CoExecutor):
             raise RuntimeError("Executor is closed.")
 
         async def _launcher():
+            if "loop" in kwargs:
+                if kwargs["loop"] is not self._loop:
+                    raise RuntimeError("Loop mismatch. Definitely a bug.")
+            else:
+                kwargs["loop"] = self._loop
             ret = await coroutine_function(*args, **kwargs)
             self._current_workers -= 1
             while len(self._pending_queue) > 0 and self._current_workers < self._max_workers:
                 waiting_future = self._pending_queue.popleft()
                 self._current_workers += 1
                 asyncio.ensure_future(waiting_future, loop=self._loop)
+            if self._idle():
+                async with self._waiter:
+                    self._waiter.notify_all()
             return ret
         future = _launcher()
 
@@ -58,6 +66,9 @@ class CoroutinePoolExecutor(CoExecutor):
         else:
             self._pending_queue.append(future)
         return future
+
+    def _idle(self):
+        return self._current_workers == 0 and len(self._pending_queue) == 0
 
     @overrides
     def map(self, coroutine_function, *iterables, timeout=None):
@@ -69,44 +80,60 @@ class CoroutinePoolExecutor(CoExecutor):
 
     @overrides
     async def shutdown(self, wait=True):
-        raise NotImplementedError()
+        self._shutdowned = True
 
-    pass
+        async def _cancel_futures():
+            try:
+                async with self._waiter:
+                    await self._waiter.wait_for(self._idle)
+                    for (key, future) in self._futures_to_wait.items():
+                        future.cancel()
+            except asyncio.CancelledError:
+                pass
+
+        if wait:
+            await _cancel_futures()
+        else:
+            asyncio.ensure_future(_cancel_futures(), loop=self._loop)
 
 
 def main():
-    coex = CoroutinePoolExecutor()
-    loop = asyncio.get_event_loop()
+    async def test(loop):
+        await asyncio.sleep(1, loop=loop)
+        print("hello")
 
-    async def waiter(loop):
-        try:
-            print("enter waiter")
-            await asyncio.sleep(10,loop=loop)
-            print("sleep waiter")
-        except asyncio.CancelledError as e:
-            print("waiter canceled", e)
-        except Exception as e:
-            print("waiter", e)
-        finally:
-            loop.stop()
-            print("end waiter")
 
-    future = asyncio.ensure_future(waiter(loop))
+    loop = asyncio.new_event_loop()
+    coex = CoroutinePoolExecutor(loop=loop, debug=True)
+    coex.submit(test)
+    coex.submit(test)
+    coex.submit(test)
+    coex.submit(test)
 
-    async def waiter2(loop):
-        try:
-            await asyncio.sleep(1,loop=loop)
-            future.cancel()
-        except Exception as e:
-            print("waiter2", e)
-        finally:
-            pass
+    async def async_main(loop):
+        print("ha1")
+        await coex.shutdown(wait=False)
+        await asyncio.sleep(3, loop=loop)
+        print("ha2")
+        await coex.shutdown(wait=True)
+        print("ha3")
 
-    asyncio.ensure_future(waiter2(loop))
+    async def async_main2(loop):
+        print("ho1")
+        await asyncio.sleep(2, loop=loop)
+        await coex.shutdown(wait=True)
+        await coex.shutdown(wait=False)
+        print("ho2")
+        await coex.shutdown(wait=True)
+        print("ho3")
+
     try:
+        #loop.run_until_complete(async_main(loop=loop))
+        asyncio.ensure_future(async_main(loop=loop), loop=loop)
+        asyncio.ensure_future(async_main2(loop=loop), loop=loop)
         loop.run_forever()
-    except Exception as e:
-        print("main", e)
+    finally:
+        loop.close()
 
 if __name__ == "__main__":
     main()
