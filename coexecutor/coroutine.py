@@ -164,26 +164,35 @@ class CoroutinePoolExecutor(CoExecutor):
         else:
             asyncio.ensure_future(_cancel_futures(), loop=self._loop)
 
-
+import time
+from concurrent.futures import ThreadPoolExecutor
 def main():
     async def test(index, index2, loop):
         await asyncio.sleep(1, loop=loop)
         print("test", index, index2)
         return (index,index2)
 
+    def test_thread(index, index2):
+        time.sleep(1)
+        print("test", index, index2)
+        return (index, index2)
+
 
     loop = asyncio.new_event_loop()
 
     async def async_main(loop):
-        coex = CoroutinePoolExecutor(loop=loop, max_workers=4, debug=True)
-        async for ret in coex.map(test, range(10), range(10,20)):
-            print(ret)
-        await coex.shutdown(wait=True)
+        async with CoroutinePoolExecutor(loop=loop, max_workers=4, debug=True) as coex:
+            async for ret in coex.map(test, range(10), range(10,20)):
+                print(ret)
 
     try:
         loop.run_until_complete(async_main(loop=loop))
     finally:
         loop.close()
+
+    with ThreadPoolExecutor(max_workers=4) as exe:
+        for x in exe.map(test_thread, range(10), range(10,20)):
+            print(x)
 
 if __name__ == "__main__":
     main()
