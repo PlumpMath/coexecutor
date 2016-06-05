@@ -7,8 +7,9 @@ from coexecutor import CoroutinePoolExecutor
 from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 
-_max_time = 3
-_precision = 0.5
+_max_time = 5
+_precision = 1
+_start_warm_up = 1
 
 time_limit = round(_max_time / _precision)
 
@@ -34,7 +35,7 @@ async def async_wake_at(at,*,loop):
 
 def input_generator(num_workers, start_time=None):
     if start_time is None:
-        start_time = time.time() + 1
+        start_time = time.time() + _start_warm_up
     input = []
     current_base = 0
 
@@ -42,7 +43,7 @@ def input_generator(num_workers, start_time=None):
     while current_base < time_limit:
         unique = set()
         while len(unique) != num_workers:
-            r = random.randint(0, num_workers*2)+1
+            r = random.randint(1, num_workers*2)
             unique.add(r)
         sample = list(unique)
         random.shuffle(sample)
@@ -61,7 +62,7 @@ def input_generator(num_workers, start_time=None):
 
 def do_test1(workers):
     param = {"max_workers": workers}
-    start = round(time.time() + 1)
+    start = round(time.time() + _start_warm_up)
     input = input_generator(workers, start)
     loop = asyncio.new_event_loop()
 
@@ -166,7 +167,7 @@ def do_test2(workers):
 
     texec.shutdown(True)
 
-    pstart = round(time.time() + 1)
+    pstart = round(time.time() + _start_warm_up)
     input1 = [pstart + i for i in pre_input1]
 
     for x in pexec.map(wake_at, input1):
@@ -175,7 +176,7 @@ def do_test2(workers):
 
     pexec.shutdown(True)
 
-    cstart = round(time.time() + 1)
+    cstart = round(time.time() + _start_warm_up)
     input1 = [cstart + i for i in pre_input1]
 
     async def async_main():
@@ -267,7 +268,7 @@ def do_test3(workers):
 
     texec.shutdown(True)
 
-    pstart = round(time.time() + 1)
+    pstart = round(time.time() + _start_warm_up)
     input1 = [pstart + i for i in pre_input1]
     input2 = [pstart + i for i in pre_input2]
     input3 = [pstart + i for i in pre_input3]
@@ -287,7 +288,7 @@ def do_test3(workers):
 
     pexec.shutdown(True)
 
-    cstart = round(time.time() + 1)
+    cstart = round(time.time() + _start_warm_up)
     input1 = [cstart + i for i in pre_input1]
     input2 = [cstart + i for i in pre_input2]
     input3 = [cstart + i for i in pre_input3]
