@@ -35,3 +35,11 @@ class CoExecutor:
     @final
     async def __aexit__(self, exc_type, exc, tb):
         await self.shutdown(wait=True)
+
+    @final
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        raise NotImplementedError("Use CoExecutor with \"async with\" statement")
+
+    @final
+    def __enter__(self):
+        raise NotImplementedError("Use CoExecutor with \"async with\" statement")
