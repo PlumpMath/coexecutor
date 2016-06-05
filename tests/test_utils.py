@@ -8,7 +8,7 @@ from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 
 _max_time = 3
-_precision = 0.1
+_precision = 0.5
 
 time_limit = round(_max_time / _precision)
 
@@ -42,7 +42,7 @@ def input_generator(num_workers, start_time=None):
     while current_base < time_limit:
         unique = set()
         while len(unique) != num_workers:
-            r = random.randint(0, num_workers*3)+1
+            r = random.randint(0, num_workers*2)+1
             unique.add(r)
         sample = list(unique)
         random.shuffle(sample)
