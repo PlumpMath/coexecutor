@@ -1,6 +1,7 @@
 from coexecutor._base import *
 import asyncio
-from collections import deque
+import collections
+import enum
 
 class CoroutinePoolExecutor(CoExecutor):
     def __init__(self, max_workers: int = 1, loop: asyncio.AbstractEventLoop = None, debug=False):
@@ -16,7 +17,7 @@ class CoroutinePoolExecutor(CoExecutor):
         self._max_workers = max_workers
         self._futures_to_wait = dict()
         self._debug = debug
-        self._pending_queue = deque()
+        self._pending_queue = collections.deque()
         self._shutdowned = False
         self._waiter = asyncio.Condition(loop=self._loop)
 
@@ -30,13 +31,18 @@ class CoroutinePoolExecutor(CoExecutor):
 
                 except asyncio.CancelledError:
                     print("All tasks are done! [%d]" % self._current_workers)
-                    del self._futures_to_wait["thread_monitor"]
 
             self._futures_to_wait["thread_monitor"] = asyncio.ensure_future(_thread_monitor(), loop=self._loop)
 
     async def _launcher(self, coro):
-        ret = await coro
-        self._current_workers -= 1
+        exception = None
+        try:
+            ret = await coro
+        except Exception as e:
+            exception = e
+            pass
+        finally:
+            self._current_workers -= 1
         while self._current_workers < self._max_workers:
             waiting_future = None
             while len(self._pending_queue) > 0:
@@ -55,6 +61,8 @@ class CoroutinePoolExecutor(CoExecutor):
         if self._idle():
             async with self._waiter:
                 self._waiter.notify_all()
+        if exception is not None:
+            raise exception
         return ret
 
     @overrides
@@ -84,56 +92,16 @@ class CoroutinePoolExecutor(CoExecutor):
     def _idle(self):
         return self._current_workers == 0 and len(self._pending_queue) == 0
 
-    class _async_generator():
-        def __init__(self, loop, limit=None):
-            if limit is None:
-                limit = 0
-            self._queue = asyncio.Queue(maxsize=limit, loop=loop)
-            self._stopped = False
-            self._waiter = None
-
-        async def put(self, item):
-            await self._queue.put(item)
-
-        def stop(self):
-            if not self._stopped:
-                self._stopped = True
-                if self._queue.empty() and self._waiter is not None:
-                    self._waiter.cancel()
-
-        async def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            if self._stopped and self._queue.empty():
-                raise StopAsyncIteration
-            future = self._queue.get()
-            self._waiter = future
-            try:
-                return await future
-            except asyncio.CancelledError:
-                self._waiter = None
-                raise StopAsyncIteration
-
-
     @overrides
-    def map(self, coroutine_function, *iterables, limit=None):
+    def map(self, coroutine_function, *iterables, limit=None, timeout=None):
         if coroutine_function is None or not asyncio.iscoroutinefunction(coroutine_function):
             raise TypeError("Must provide a coroutine function")
         if self._shutdowned:
             raise RuntimeError("Executor is closed.")
 
-        queue = self._async_generator(loop=self._loop, limit=limit)
-
-        def _coroutine_generator():
-            async def _wrapper(arg):
-                ret = await coroutine_function(*arg, loop=self._loop)
-                await queue.put(ret)
-            for arg in zip(*iterables):
-                yield self._launcher(_wrapper(arg))
-            queue.stop()
-
-        generator = _coroutine_generator()
+        queue = _async_generator(self._launcher, coroutine_function, iterables,
+                                      self._loop, timeout=timeout, limit=limit)
+        generator = queue.get_coroutine_generator()
 
         while self._current_workers < self._max_workers:
             self._current_workers += 1
@@ -156,16 +124,150 @@ class CoroutinePoolExecutor(CoExecutor):
                     await self._waiter.wait_for(self._idle)
                     for (key, future) in self._futures_to_wait.items():
                         future.cancel()
+                        try:
+                            await future
+                        except asyncio.CancelledError:
+                            pass
+                    self._futures_to_wait.clear()
             except asyncio.CancelledError:
                 pass
 
         if wait:
             await _cancel_futures()
         else:
-            asyncio.ensure_future(_cancel_futures(), loop=self._loop)
+            return asyncio.ensure_future(_cancel_futures(), loop=self._loop)
+
+
+class _async_generator():
+    class AsyncResult(enum.Enum):
+        result = 1
+        exception = 2
+        eof = 3
+
+    def get_coroutine_generator(self):
+        return self._generator
+
+    def time_to_wait(self):
+        if self._end_time is not None:
+            current_wait = self._end_time - time.time()
+            if current_wait < 0:
+                current_wait = 0
+            return current_wait
+        return None
+
+    def __init__(self, wrapper, coro_fun, iterables, loop, timeout=None, limit=None):
+        self._wrapper = wrapper
+        self._loop = loop
+        self._end_time = None
+        if timeout is not None:
+            self._end_time = time.time() + timeout
+        if limit is not None and limit > 0:
+            self._sema = asyncio.BoundedSemaphore(value=limit, loop=self._loop)
+        else:
+            self._sema = None
+        self._coro_fun = coro_fun
+
+        self._running_futures = set()
+        self._async_result_queue = []
+        self._wakeup_iterator = asyncio.Condition(loop=self._loop)
+        self._iterables = iterables
+        self._stopped = False
+        self._generator = self._coroutine_generator()
+
+
+    def _coroutine_generator(self):
+        async def _wrapper(arg):
+            async def _inner_wrapper(arg):
+                try:
+                    error = None
+                    ret = None
+                    try:
+                        ret = await self._coro_fun(*arg, loop=self._loop)
+                    except asyncio.CancelledError as e:
+                        raise e
+                    except Exception as e:
+                        error = e
+                    if self._sema is not None:
+                        await self._sema.acquire()
+                    async with self._wakeup_iterator:
+                        if error is not None:
+                            self._async_result_queue.append((self.AsyncResult.exception, error))
+                        else:
+                            self._async_result_queue.append((self.AsyncResult.result, ret))
+                        self._wakeup_iterator.notify_all()
+                except asyncio.CancelledError:
+                    pass
+
+            future = asyncio.ensure_future(_inner_wrapper(arg), loop=self._loop)
+            self._running_futures.add(future)
+            try:
+                await future
+            finally:
+                self._running_futures.remove(future)
+                if len(self._running_futures) == 0:
+                    try:
+                        async with self._wakeup_iterator:
+                            self._async_result_queue.append((self.AsyncResult.eof, None))
+                            self._wakeup_iterator.notify_all()
+                    except asyncio.CancelledError:
+                        assert False
+                        pass
+        for arg in zip(*self._iterables):
+            if self._stopped:
+                raise StopIteration
+            try:
+                yield self._wrapper(_wrapper(arg))
+            except GeneratorExit:
+                raise StopIteration
+
+    async def __anext__(self):
+        if self._stopped:
+            raise StopAsyncIteration
+        async with self._wakeup_iterator:
+            pending_timer = None
+            while len(self._async_result_queue) == 0:
+                wait_time = self.time_to_wait()
+                if wait_time is not None:
+                    async def _timer():
+                        try:
+                            await asyncio.sleep(wait_time, loop=self._loop)
+                            async with self._wakeup_iterator:
+                                self._wakeup_iterator.notify_all()
+                        except asyncio.CancelledError:
+                            pass
+                    pending_timer = asyncio.ensure_future(_timer(), loop=self._loop)
+                await self._wakeup_iterator.wait()
+                if pending_timer is not None:
+                    time_remaining = pending_timer.cancel()
+                    await pending_timer
+                    pending_timer = None
+                    if not time_remaining:
+                        self._stopped = True
+                        self._generator.close()
+                        current_wait = []
+                        for future in self._running_futures:
+                            future.cancel()
+                            current_wait.append(future)
+                        for future in current_wait:
+                            await future
+                        raise asyncio.TimeoutError("map timeout")
+            (result_type, result) = self._async_result_queue.pop(0)
+            if self._sema is not None:
+                self._sema.release()
+            if result_type == self.AsyncResult.eof:
+                self._stopped = True
+                raise StopAsyncIteration
+            elif result_type == self.AsyncResult.exception:
+                raise result
+            elif result_type == self.AsyncResult.result:
+                return result
+
+    async def __aiter__(self):
+        return self
+
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 def main():
     async def test(index, index2, loop):
         await asyncio.sleep(1, loop=loop)
@@ -177,22 +279,27 @@ def main():
         print("test", index, index2)
         return (index, index2)
 
-
     loop = asyncio.new_event_loop()
 
     async def async_main(loop):
-        async with CoroutinePoolExecutor(loop=loop, max_workers=4, debug=True) as coex:
-            async for ret in coex.map(test, range(10), range(10,20)):
-                print(ret)
+        async with CoroutinePoolExecutor(loop=loop, max_workers=1) as coex:
+            try:
+                async for ret in coex.map(test, range(10), range(10,20), timeout=2):
+                    print(ret)
+            except asyncio.TimeoutError:
+                pass
 
     try:
         loop.run_until_complete(async_main(loop=loop))
     finally:
         loop.close()
 
-    with ThreadPoolExecutor(max_workers=4) as exe:
-        for x in exe.map(test_thread, range(10), range(10,20)):
-            print(x)
+    with ThreadPoolExecutor(max_workers=1) as exe:
+        try:
+            for x in exe.map(test_thread, range(10), range(10,20), timeout=2):
+                print(x)
+        except TimeoutError:
+            pass
 
 if __name__ == "__main__":
     main()
