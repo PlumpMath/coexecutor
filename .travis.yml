@@ -1,0 +1,16 @@
+language: python
+python:
+  - 3.5
+  - 3.5-dev
+# command to install dependencies
+install:
+  - pip install --upgrade pip wheel setuptools
+  - pip install -r requirements.txt
+  - pip install --force-reinstall git+https://github.com/leeopop/overrides.git@master
+  - pip install nose-cov tissue coveralls
+  - pip install .
+# command to run tests
+script:
+  - nosetests --with-cov --cov-report term-missing --cov overrides tests/
+after_success:
+  - coveralls
