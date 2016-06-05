@@ -345,5 +345,3 @@ def do_test3(workers):
             assert False
     return result
 
-if __name__ == "__main__":
-    do_test2(2)
