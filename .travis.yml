@@ -8,7 +8,6 @@ matrix:
         - pip install --upgrade pip wheel setuptools
         - pip install -r requirements.txt
         - pip install --force-reinstall git+https://github.com/leeopop/overrides.git@master
-        - pip install nose-cov tissue coveralls
         - pip install .
     - os: linux
       python: 3.5-dev
@@ -16,25 +15,22 @@ matrix:
         - pip install --upgrade pip wheel setuptools
         - pip install -r requirements.txt
         - pip install --force-reinstall git+https://github.com/leeopop/overrides.git@master
-        - pip install nose-cov tissue coveralls
         - pip install .
     - os: linux
       python: 3.5
       install:
         - pip install --upgrade pip wheel setuptools
         - pip install -r requirements.txt
-        - pip install nose-cov tissue coveralls
         - pip install .
     - os: linux
       python: 3.5-dev
       install:
         - pip install --upgrade pip wheel setuptools
         - pip install -r requirements.txt
-        - pip install nose-cov tissue coveralls
         - pip install .
 
 # command to run tests
 script:
-  - nosetests --with-cov --cov-report term-missing --cov coexecutor tests/test_all.py
+  - python tests/test_all.py
 after_success:
   - coveralls
