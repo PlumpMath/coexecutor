@@ -7,7 +7,7 @@ from coexecutor import CoroutinePoolExecutor
 from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 
-_max_time = 5
+_max_time = 10
 _precision = 1
 _start_warm_up = 1
 
