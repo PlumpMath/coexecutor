@@ -31,6 +31,6 @@ matrix:
 
 # command to run tests
 script:
-  - python tests/test_all.py
+  - python test.py
 after_success:
   - coveralls
