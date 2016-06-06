@@ -9,22 +9,32 @@ def _enc(t):
         r += _ciper[len(_ciper) - 1 - _ciper.index(x)]
     return r
 
-long_description=\
-"""
+long_description = """
 Though CoExecutor uses 1 CPU core at any time,
+
 limitations such as 'max_workers' are needed for
 limiting concurrent asyncio connections.
+
 This is useful when you are building a asyncio-based web crawler.
+
 It is designed to have exactly same result with respect to
 python's ThreadPoolExecutor and ProcessPoolExecutor.
+
 Also, CoExecutor supports additional features like
 'limit' or 'out_of_order'.
-coexecutor.map(..., limit=X) limits the number of pending futures (done, but not collected yet).
+
+coexecutor.map(..., limit=X) limits the number of pending futures
+(done, but not collected yet).
+
 coexecutor.map(..., out_of_order=True) ignores the input iterator's ordering.
+
 The results are collected by the termination order of the jobs.
+
 CoExecutor constructor requires a loop to rely on.
+
 With debug=True, it will print the number of active coroutines per second.
-Works on python3.5 only.
+
+Works with Python3.5 only.
 """
 
 classifiers=[
@@ -60,8 +70,9 @@ setup(
     description="CoroutinePoolExecutor compatible to ThreadPoolExecutor and ProcessPoolExecutor",
     long_description=long_description,
     url="https://github.com/leeopop/coexecutor",
+    download_url="https://github.com/leeopop/coexecutor",
     author="Keunhong Lee",
-    author_email=_enc("pkebytcp"),
+    author_email=_enc("pkebytcp")+"@gmail.com",
     license="LGPLv3+",
     classifiers=classifiers,
     keywords="coroutine pool executor",
