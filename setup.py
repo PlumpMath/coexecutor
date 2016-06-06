@@ -56,7 +56,7 @@ setup(
     # 1.2.0b1     # Beta Release
     # 1.2.0rc1    # Release Candidate
     # 1.2.0       # Final Release
-    version=StrictVersion("0.0.1a1"),
+    version=str(StrictVersion("0.0.1a1")),
     description="CoroutinePoolExecutor compatible to ThreadPoolExecutor and ProcessPoolExecutor",
     long_description=long_description,
     url="https://github.com/leeopop/coexecutor",
