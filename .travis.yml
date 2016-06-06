@@ -17,13 +17,6 @@ matrix:
         - pip install --force-reinstall git+https://github.com/leeopop/overrides.git@master
         - pip install .
     - os: linux
-      python: nightly
-      install:
-        - pip install --upgrade pip wheel setuptools
-        - pip install -r requirements.txt
-        - pip install --force-reinstall git+https://github.com/leeopop/overrides.git@master
-        - pip install .
-    - os: linux
       python: 3.5
       install:
         - pip install --upgrade pip wheel setuptools
