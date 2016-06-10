@@ -110,7 +110,7 @@ class CoroutinePoolExecutor(CoExecutor):
         if self._shutdowned:
             raise RuntimeError("Executor is closed.")
 
-        queue = _async_generator(self._launcher, coroutine_function, iterables,
+        queue = AsyncGenerator(self._launcher, coroutine_function, iterables,
                                  self._loop, timeout=timeout, limit=limit, out_of_order=out_of_order)
         generator = queue.get_coroutine_generator()
 
@@ -149,7 +149,7 @@ class CoroutinePoolExecutor(CoExecutor):
             return asyncio.ensure_future(_cancel_futures(), loop=self._loop)
 
 
-class _async_generator():
+class AsyncGenerator():
     class AsyncResult(enum.Enum):
         future = 0
         result = 1
@@ -188,7 +188,6 @@ class _async_generator():
         self._iterables = iterables
         self._stopped = False
         self._generator = self._coroutine_generator()
-
 
     def _coroutine_generator(self):
         async def _wrapper(arg, loop):
@@ -333,41 +332,10 @@ class _async_generator():
     async def __aiter__(self):
         return self
 
+    @final
+    def __iter__(self):
+        raise NotImplementedError("Use coexecutor.map with \"async for\" statement")
 
-import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
-def main():
-    async def test(index, index2, loop):
-        await asyncio.sleep(1, loop=loop)
-        print("test", index, index2)
-        return (index,index2)
-
-    def test_thread(index, index2):
-        time.sleep(1)
-        print("test", index, index2)
-        return (index, index2)
-
-    loop = asyncio.new_event_loop()
-
-    async def async_main(loop):
-        async with CoroutinePoolExecutor(loop=loop, max_workers=1) as coex:
-            try:
-                async for ret in coex.map(test, range(10), range(10,20), timeout=2):
-                    print(ret)
-            except asyncio.TimeoutError:
-                pass
-
-    try:
-        loop.run_until_complete(async_main(loop=loop))
-    finally:
-        loop.close()
-
-    with ThreadPoolExecutor(max_workers=1) as exe:
-        try:
-            for x in exe.map(test_thread, range(10), range(10,20), timeout=2):
-                print(x)
-        except TimeoutError:
-            pass
-
-if __name__ == "__main__":
-    main()
+    @final
+    def __next__(self):
+        raise NotImplementedError("Use coexecutor.map with \"async for\" statement")
